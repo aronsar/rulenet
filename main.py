@@ -3,25 +3,21 @@ import numpy as np
 import pdb
 
 DATADIR = './new_facebook/'
-USER_ID = '0'
+USER_ID = '107' # options are 0, 107, 348, 414, ...
+LEARNING_RATE = 1e-3
 RANDOM_SEED = 42
+NUM_STEPS = 100 # number of learning steps; 1 step per alter
+BATCH_SIZE = 940
+DISPLAY_EVERY = 1
 
 np.random.seed(RANDOM_SEED)
 tf.set_random_seed(RANDOM_SEED)
 
-class Alter:
-  def __init__(self, feature_vec, mutual_friends_vec, circle_membership):
-    self.feature_vec = feature_vec
-    self.mutual_friends_vec = mutual_friends_vec
-    self.circle_membership = circle_membership
-
-    
 def file_len(fname):
   with open(fname) as f:
     for i, l in enumerate(f):
       pass
   return i + 1
-
 
 def dataReader(data_dir=DATADIR, user_id=USER_ID):
   num_mutual_friends = file_len(DATADIR + USER_ID + '.feat')
@@ -49,49 +45,125 @@ def dataReader(data_dir=DATADIR, user_id=USER_ID):
   with open(DATADIR + USER_ID + '.circles') as f:
     for circle_index, line in enumerate(f):
       for member in line.split(' ')[1:]: # we ignore the first word, which is just the circle index
-        circle_membership_matrix[int(member),circle_index] = 1
+        if not member.isspace(): circle_membership_matrix[int(member),circle_index] = 1
   
-  # the following for loop creates an array of alter objects
-  for mutual_friend in range(num_mutual_friends):
-    alter_array.append(Alter(feature_matrix[mutual_friend, :],
-                             mutual_friends_matrix[mutual_friend, :],
-                             circle_membership_matrix[mutual_friend, :]))
-                             
-  shuffled_alter_array = np.random.permutation(alter_array)
+  idxs = np.random.shuffle(np.arange(num_mutual_friends))
   lim = int(.9 * num_mutual_friends)
-  train_alters = shuffled_alter_array[:lim]
-  test_alters = shuffled_alter_array[lim:]
+  X_trainm = mutual_friends_matrix[:lim,:] # the m at the end of X_trainm is for "matrix"
+  X_testm = mutual_friends_matrix[lim:,:]
+  B_trainm = feature_matrix[:lim,:]
+  B_testm = feature_matrix[lim:,:]
+  Y_trainm = circle_membership_matrix[:lim,:]
+  Y_testm = circle_membership_matrix[lim:,:]
   
-  return train_alters, test_alters
+  return X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm
+
+def forwardPass(X, B, weights, biases):
+  HL1 = tf.add(tf.matmul(X, weights['HL1']), biases['HL1'])
+  HL1 = tf.nn.relu(HL1)
+  
+  BO2 = tf.add(tf.matmul(HL1, weights['BO2']), biases['BO2'])
+  BO2 = tf.nn.relu(BO2)
+  #BO2 = tf.add(tf.matmul(HL1, weights['BO2']), B)
+  #BO2 = tf.multiply(BO2, B)
+  # do one of:
+    # add in logical feature vector as bias
+    # multiply in the logical feature vector as bias
+    # transform logical feature vector from [0,1] to [1,10] and multiply in as bias
+  
+  HL3 = tf.add(tf.matmul(BO2, weights['HL3']), biases['HL3'])
+  
+  return HL3
+  
+def modelPrecisionRecall(logits, labels):
+  # We compute precision by dividing the number of correctly assigned circle memberships
+  # by the total number of assigned circle memberships in pred. 
+  
+  # To find recall, we divide the total correctly assigned circle memberships 
+  # by the total number of circle memberships in the labels.
+  
+  pred = tf.round(tf.nn.sigmoid(logits)) # basically .5 thresholding
+  mult = tf.multiply(pred, labels)
+  precision = tf.divide(tf.reduce_sum(mult), tf.reduce_sum(pred))
+  recall = tf.divide(tf.reduce_sum(mult), tf.reduce_sum(labels))
+  #recall = tf.Print(recall, [tf.reduce_sum(labels), tf.reduce_sum(pred), tf.reduce_sum(mult)])
+  #recall = tf.Print(recall, [tf.reduce_min(pred), tf.reduce_max(pred), tf.reduce_min(labels), tf.reduce_max(labels), tf.reduce_min(mult), tf.reduce_max(mult)])
+  return precision, recall
 
 def main():
-  train_alters, test_alters = dataReader(DATADIR, USER_ID)
-  num_alters = len(train_alters)
+  print('Loading data ... ', end='') # don't print new line (for aesthetic reasons)
+  X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm = dataReader(DATADIR, USER_ID)
+  num_alters = file_len(DATADIR + USER_ID + '.feat')
+  num_feat = file_len(DATADIR + USER_ID + '.featnames')
+  num_circles = file_len(DATADIR + USER_ID + '.circles')
+  print('Loaded!\n')
   
   # Training
+  print('Training ... ')
   graph = tf.Graph()
   
   with graph.as_default():
-    # get an alter
-    step_ph = tf.placeholder(dtype=tf.float32, shape=())
-    alter = train_alters[step_ph % num_alters]
+    # convert data to tensors
+    X_train = tf.convert_to_tensor(X_trainm, dtype=tf.float32)
+    X_test = tf.convert_to_tensor(X_testm, dtype=tf.float32)
+    B_train = tf.convert_to_tensor(B_trainm, dtype=tf.float32)
+    B_test = tf.convert_to_tensor(B_testm, dtype=tf.float32)
+    Y_train = tf.convert_to_tensor(Y_trainm, dtype=tf.float32)
+    Y_test = tf.convert_to_tensor(Y_testm, dtype=tf.float32)
+    n_alt = tf.convert_to_tensor(num_alters, dtype=tf.int32)
+
+    # defining training batch
+    step_ph = tf.placeholder(dtype=tf.int32, shape=())
+    idx = tf.mod(step_ph*BATCH_SIZE, n_alt-BATCH_SIZE)
+    X = X_train[idx:(idx+BATCH_SIZE), :]
+    B = B_train[idx:(idx+BATCH_SIZE), :]
+    Y = Y_train[idx:(idx+BATCH_SIZE), :]
+
+    # hidden layer sizes
+    h1 = int((num_alters + num_feat) / 2)
     
-    # alter.mutual_friends_vec is input [1 x num_alters]
-    # multiply by weight matrix [num_alters x h1]
-    # add in bias [1 x h1]
-    # activation function (ReLu)
+    # defining weights and biases
+    weights = {
+      'HL1': tf.Variable( tf.random_normal([num_alters, h1], seed=RANDOM_SEED), dtype=tf.float32),
+      'BO2': tf.Variable(tf.random_normal([h1, num_feat], seed=RANDOM_SEED), dtype=tf.float32),
+      'HL3': tf.Variable(tf.random_normal([num_feat, num_circles], seed=RANDOM_SEED), dtype=tf.float32),
+      }
+
+    biases = {
+      'HL1': tf.Variable(tf.random_normal([h1], seed=RANDOM_SEED), dtype=tf.float32),
+      'BO2': tf.Variable(tf.random_normal([num_feat], seed=RANDOM_SEED), dtype=tf.float32),
+      'HL3': tf.Variable(tf.random_normal([num_circles], seed=RANDOM_SEED), dtype=tf.float32)
+    }
+
+    logits = forwardPass(X, B, weights, biases)
     
-    # multiply input by weight matrix [1 x h1] * [h1 x num_feat]
-    # do one of:
-      # add in logical feature vector as bias
-      # multiply in the logical feature vector as bias
-      # transform logical feature vector from [0,1] to [1,10] and multiply in as bias
+    loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y)
+
+    optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(loss)
     
-    # do one more fc layer, where the size of the logits is [1 x num_circles]
+    tr_logits = forwardPass(X_train, B_train, weights, biases)
+    tr_precision, tr_recall = modelPrecisionRecall(tr_logits, Y_train)
     
-    # multi-class, multi-label loss
-    loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=alter.circle_membership,
-                                                 logits=
+    te_logits = forwardPass(X_test, B_test, weights, biases)
+    te_precision, te_recall = modelPrecisionRecall(te_logits, Y_test)
+    
+  with tf.Session(graph=graph) as sess:
+    # Initialize the model parameters
+    tf.global_variables_initializer().run()
   
+    for step in range(NUM_STEPS):
+      feed_dict = {step_ph:step}
+
+          
+      if step % DISPLAY_EVERY:
+        _, loss_value = sess.run([optimizer, loss], feed_dict=feed_dict)
+      else:
+        _, loss_value, tr_p, tr_r, te_p, te_r = sess.run(                        \
+            [optimizer, loss, tr_precision, tr_recall, te_precision, te_recall], \
+            feed_dict=feed_dict)
+        print(('step {:4d}:   loss={:7.3f}   tr_p={:.3f}   tr_r={:.3f}'          \
+             + '   te_p={:.3f}   te_r={:.3f}').format(                           \
+              step, loss_value, tr_p, tr_r, te_p, te_r))
+      
 if __name__ == '__main__':
-    main()
+  main()
