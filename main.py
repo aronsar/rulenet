@@ -7,7 +7,7 @@ USER_ID = '107' # options are 0, 107, 348, 414, ...
 LEARNING_RATE = 1e-3
 RANDOM_SEED = 42
 NUM_STEPS = 100 # number of learning steps; 1 step per alter
-BATCH_SIZE = 940
+BATCH_SIZE = 940# for ego 107, 940 is all the training alters. Try reducing BATCH_SIZE to just 10 or 50
 DISPLAY_EVERY = 1
 
 np.random.seed(RANDOM_SEED)
