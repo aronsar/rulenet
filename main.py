@@ -58,7 +58,58 @@ def dataReader(data_dir=DATADIR, user_id=USER_ID):
   
   return X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm
 
-def forwardPass(X, B, weights, biases):
+def variable_summaries(var):
+  '''Attach a lot of summaries to a Tensor (for TensorBoard visualization).'''
+  with tf.name_scope('summaries'):
+    mean = tf.reduce_mean(var)
+    tf.summary.scalar('mean', mean)
+    with tf.name_scope('stddev'):
+      stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+    tf.summary.scalar('stddev', stddev)
+    tf.summary.scalar('max', tf.reduce_max(var))
+    tf.summary.scalar('min', tf.reduce_min(var))
+    tf.summary.histogram('histogram', var)
+
+def weight_variable(shape):
+  initial = tf.random_normal(shape, seed=RANDOM_SEED)
+  return tf.Variable(initial, dtype=tf.float32)
+
+def bias_variable(shape):
+  initial = tf.random_normal(shape=shape, seed=RANDOM_SEED)
+  return tf.Variable(initial, dtype=tf.float32)    
+
+def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
+  with tf.name_scope(layer_name):
+    with tf.name_scope('weights'):
+      weights = weight_variable([input_dim, output_dim])
+      variable_summaries(weights)
+    with tf.name_scope('biases'):
+      biases = bias_variable([output_dim])
+      variable_summaries(biases)
+    with tf.name_scope('Wx_plus_b'):
+      preactivate = tf.matmul(input_tensor, weights) + biases
+      tf.summary.histogram('pre_activations', preactivate)
+    activations = act(preactivate, name='activation')
+    tf.summary.histogram('activations', activations)
+    return activations
+
+def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
+  with tf.name_scope(layer_name):
+    with tf.name_scope('weights'):
+      weights = weight_variable([input_dim, output_dim])
+      variable_summaries(weights)
+    with tf.name_scope('biases'):
+      biases = bias_variable([output_dim])
+      variable_summaries(biases)
+    with tf.name_scope('Wx_plus_b'):
+      preactivate = tf.matmul(input_tensor, weights) + biases
+      tf.summary.histogram('pre_activations', preactivate)
+    activations = act(preactivate, name='activation')
+    tf.summary.histogram('activations', activations)
+    return activations
+    
+def forwardPass(X, B, num_alters, num_feat, num_circles):
+  '''
   HL1 = tf.add(tf.matmul(X, weights['HL1']), biases['HL1'])
   HL1 = tf.nn.relu(HL1)
   
@@ -69,11 +120,18 @@ def forwardPass(X, B, weights, biases):
   # do one of:
     # add in logical feature vector as bias
     # multiply in the logical feature vector as bias
-    # transform logical feature vector from [0,1] to [1,10] and multiply in as bias
+    # transform logical feature vector from {0,1} to {1,10} and multiply in as bias
   
   HL3 = tf.add(tf.matmul(BO2, weights['HL3']), biases['HL3'])
+  '''
+  # hidden layer sizes
+  h1 = int((num_alters + num_feat) / 2)
   
-  return HL3
+  layer1 = affine_layer(X, num_alters, h1, 'affine_layer1')
+  layer2 = bool_injection_layer(layer1, B, h1, num_feat, 'bool_inj_layer2')
+  logits = affine_layer(layer2, num_feat, num_circles, 'affine_layer3', act=tf.identity)
+  
+  return logits
   
 def modelPrecisionRecall(logits, labels):
   # We compute precision by dividing the number of correctly assigned circle memberships
@@ -82,7 +140,7 @@ def modelPrecisionRecall(logits, labels):
   # To find recall, we divide the total correctly assigned circle memberships 
   # by the total number of circle memberships in the labels.
   
-  pred = tf.round(tf.nn.sigmoid(logits)) # basically .5 thresholding
+  pred = tf.round(tf.nn.sigmoid(logits)) # maps from [-inf, inf] to {0, 1}
   mult = tf.multiply(pred, labels)
   precision = tf.divide(tf.reduce_sum(mult), tf.reduce_sum(pred))
   recall = tf.divide(tf.reduce_sum(mult), tf.reduce_sum(labels))
@@ -90,6 +148,74 @@ def modelPrecisionRecall(logits, labels):
   #recall = tf.Print(recall, [tf.reduce_min(pred), tf.reduce_max(pred), tf.reduce_min(labels), tf.reduce_max(labels), tf.reduce_min(mult), tf.reduce_max(mult)])
   return precision, recall
 
+def main():
+  print('Loading data ... ', end='') # end='' doesn't print new line for aesthetic reasons
+  X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm = dataReader(DATADIR, USER_ID)
+  num_alters = file_len(DATADIR + USER_ID + '.feat')
+  num_feat = file_len(DATADIR + USER_ID + '.featnames')
+  num_circles = file_len(DATADIR + USER_ID + '.circles')
+  print('Loaded!\n')
+  
+  print('Training ... ')
+  
+  # defining computational graph
+  graph = tf.Graph()
+  
+  with graph.as_default():
+    # convert data to tensors
+    X_train = tf.convert_to_tensor(X_trainm, dtype=tf.float32)
+    X_test = tf.convert_to_tensor(X_testm, dtype=tf.float32)
+    B_train = tf.convert_to_tensor(B_trainm, dtype=tf.float32)
+    B_test = tf.convert_to_tensor(B_testm, dtype=tf.float32)
+    Y_train = tf.convert_to_tensor(Y_trainm, dtype=tf.float32)
+    Y_test = tf.convert_to_tensor(Y_testm, dtype=tf.float32)
+    n_alt = tf.convert_to_tensor(num_alters, dtype=tf.int32) #FIXME: try removing n_alt
+
+    #with tf.name_scope('training_step'):
+      # defining training batch
+    step_ph = tf.placeholder(dtype=tf.int32, shape=())
+    idx = tf.mod(step_ph*BATCH_SIZE, n_alt-BATCH_SIZE)
+    X = X_train[idx:(idx+BATCH_SIZE), :]
+    B = B_train[idx:(idx+BATCH_SIZE), :]
+    Y = Y_train[idx:(idx+BATCH_SIZE), :]
+    
+    logits = forwardPass(X, B, num_alters, num_feat, num_circles)
+    loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y)
+    optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(loss)
+    
+    #with tf.name_scope('training_prec_rec'):
+    tr_logits = forwardPass(X_train, B_train, num_alters, num_feat, num_circles)
+    tr_precision, tr_recall = modelPrecisionRecall(tr_logits, Y_train)
+  
+    te_logits = forwardPass(X_test, B_test, num_alters, num_feat, num_circles)
+    te_precision, te_recall = modelPrecisionRecall(te_logits, Y_test)
+    
+    # summary stuff for tensorboard
+    merged = tf.summary.merge_all()
+    summary_writer = tf.summary.FileWriter('./tf_logs', sess.graph)
+    
+  # computing session
+  with tf.Session(graph=graph) as sess:
+    # Initialize the model parameters
+    tf.global_variables_initializer().run()
+  
+    for step in range(NUM_STEPS):
+      feed_dict = {step_ph:step}
+
+          
+      if step % DISPLAY_EVERY:
+        summary, _, loss_value = sess.run([merged, optimizer, loss], feed_dict=feed_dict)
+        summary_writer.add_summary(summary, step)
+      else:
+        summary, _, loss_value, tr_p, tr_r, te_p, te_r = sess.run(               \
+            [merged, optimizer, loss, tr_precision, tr_recall, te_precision, te_recall], \
+            feed_dict=feed_dict)
+        summary_writer.add_summary(summary, step)
+        print(('step {:4d}:   loss={:7.3f}   tr_p={:.3f}   tr_r={:.3f}'          \
+             + '   te_p={:.3f}   te_r={:.3f}').format(                           \
+             step, loss_value, tr_p, tr_r, te_p, te_r))
+              
+'''
 def main():
   print('Loading data ... ', end='') # don't print new line (for aesthetic reasons)
   X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm = dataReader(DATADIR, USER_ID)
@@ -124,7 +250,7 @@ def main():
     
     # defining weights and biases
     weights = {
-      'HL1': tf.Variable( tf.random_normal([num_alters, h1], seed=RANDOM_SEED), dtype=tf.float32),
+      'HL1': tf.Variable(tf.random_normal([num_alters, h1], seed=RANDOM_SEED), dtype=tf.float32),
       'BO2': tf.Variable(tf.random_normal([h1, num_feat], seed=RANDOM_SEED), dtype=tf.float32),
       'HL3': tf.Variable(tf.random_normal([num_feat, num_circles], seed=RANDOM_SEED), dtype=tf.float32),
       }
@@ -164,6 +290,6 @@ def main():
         print(('step {:4d}:   loss={:7.3f}   tr_p={:.3f}   tr_r={:.3f}'          \
              + '   te_p={:.3f}   te_r={:.3f}').format(                           \
               step, loss_value, tr_p, tr_r, te_p, te_r))
-      
+'''  
 if __name__ == '__main__':
   main()
