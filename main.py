@@ -109,21 +109,6 @@ def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, la
     return activations
     
 def forwardPass(X, B, num_alters, num_feat, num_circles):
-  '''
-  HL1 = tf.add(tf.matmul(X, weights['HL1']), biases['HL1'])
-  HL1 = tf.nn.relu(HL1)
-  
-  BO2 = tf.add(tf.matmul(HL1, weights['BO2']), biases['BO2'])
-  BO2 = tf.nn.relu(BO2)
-  #BO2 = tf.add(tf.matmul(HL1, weights['BO2']), B)
-  #BO2 = tf.multiply(BO2, B)
-  # do one of:
-    # add in logical feature vector as bias
-    # multiply in the logical feature vector as bias
-    # transform logical feature vector from {0,1} to {1,10} and multiply in as bias
-  
-  HL3 = tf.add(tf.matmul(BO2, weights['HL3']), biases['HL3'])
-  '''
   # hidden layer sizes
   h1 = int((num_alters + num_feat) / 2)
   
@@ -192,16 +177,13 @@ def main():
     
     # summary stuff for tensorboard
     merged = tf.summary.merge_all()
+    
+  with tf.Session(graph=graph) as sess:
+    tf.global_variables_initializer().run()
     summary_writer = tf.summary.FileWriter('./tf_logs', sess.graph)
     
-  # computing session
-  with tf.Session(graph=graph) as sess:
-    # Initialize the model parameters
-    tf.global_variables_initializer().run()
-  
     for step in range(NUM_STEPS):
       feed_dict = {step_ph:step}
-
           
       if step % DISPLAY_EVERY:
         summary, _, loss_value = sess.run([merged, optimizer, loss], feed_dict=feed_dict)
@@ -214,82 +196,6 @@ def main():
         print(('step {:4d}:   loss={:7.3f}   tr_p={:.3f}   tr_r={:.3f}'          \
              + '   te_p={:.3f}   te_r={:.3f}').format(                           \
              step, loss_value, tr_p, tr_r, te_p, te_r))
-              
-'''
-def main():
-  print('Loading data ... ', end='') # don't print new line (for aesthetic reasons)
-  X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm = dataReader(DATADIR, USER_ID)
-  num_alters = file_len(DATADIR + USER_ID + '.feat')
-  num_feat = file_len(DATADIR + USER_ID + '.featnames')
-  num_circles = file_len(DATADIR + USER_ID + '.circles')
-  print('Loaded!\n')
-  
-  # Training
-  print('Training ... ')
-  graph = tf.Graph()
-  
-  with graph.as_default():
-    # convert data to tensors
-    X_train = tf.convert_to_tensor(X_trainm, dtype=tf.float32)
-    X_test = tf.convert_to_tensor(X_testm, dtype=tf.float32)
-    B_train = tf.convert_to_tensor(B_trainm, dtype=tf.float32)
-    B_test = tf.convert_to_tensor(B_testm, dtype=tf.float32)
-    Y_train = tf.convert_to_tensor(Y_trainm, dtype=tf.float32)
-    Y_test = tf.convert_to_tensor(Y_testm, dtype=tf.float32)
-    n_alt = tf.convert_to_tensor(num_alters, dtype=tf.int32)
-
-    # defining training batch
-    step_ph = tf.placeholder(dtype=tf.int32, shape=())
-    idx = tf.mod(step_ph*BATCH_SIZE, n_alt-BATCH_SIZE)
-    X = X_train[idx:(idx+BATCH_SIZE), :]
-    B = B_train[idx:(idx+BATCH_SIZE), :]
-    Y = Y_train[idx:(idx+BATCH_SIZE), :]
-
-    # hidden layer sizes
-    h1 = int((num_alters + num_feat) / 2)
-    
-    # defining weights and biases
-    weights = {
-      'HL1': tf.Variable(tf.random_normal([num_alters, h1], seed=RANDOM_SEED), dtype=tf.float32),
-      'BO2': tf.Variable(tf.random_normal([h1, num_feat], seed=RANDOM_SEED), dtype=tf.float32),
-      'HL3': tf.Variable(tf.random_normal([num_feat, num_circles], seed=RANDOM_SEED), dtype=tf.float32),
-      }
-
-    biases = {
-      'HL1': tf.Variable(tf.random_normal([h1], seed=RANDOM_SEED), dtype=tf.float32),
-      'BO2': tf.Variable(tf.random_normal([num_feat], seed=RANDOM_SEED), dtype=tf.float32),
-      'HL3': tf.Variable(tf.random_normal([num_circles], seed=RANDOM_SEED), dtype=tf.float32)
-    }
-
-    logits = forwardPass(X, B, weights, biases)
-    
-    loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y)
-
-    optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(loss)
-    
-    tr_logits = forwardPass(X_train, B_train, weights, biases)
-    tr_precision, tr_recall = modelPrecisionRecall(tr_logits, Y_train)
-    
-    te_logits = forwardPass(X_test, B_test, weights, biases)
-    te_precision, te_recall = modelPrecisionRecall(te_logits, Y_test)
-    
-  with tf.Session(graph=graph) as sess:
-    # Initialize the model parameters
-    tf.global_variables_initializer().run()
-  
-    for step in range(NUM_STEPS):
-      feed_dict = {step_ph:step}
-
-          
-      if step % DISPLAY_EVERY:
-        _, loss_value = sess.run([optimizer, loss], feed_dict=feed_dict)
-      else:
-        _, loss_value, tr_p, tr_r, te_p, te_r = sess.run(                        \
-            [optimizer, loss, tr_precision, tr_recall, te_precision, te_recall], \
-            feed_dict=feed_dict)
-        print(('step {:4d}:   loss={:7.3f}   tr_p={:.3f}   tr_r={:.3f}'          \
-             + '   te_p={:.3f}   te_r={:.3f}').format(                           \
-              step, loss_value, tr_p, tr_r, te_p, te_r))
-'''  
+               
 if __name__ == '__main__':
   main()
