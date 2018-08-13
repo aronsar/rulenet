@@ -4,7 +4,7 @@ import pdb
 
 DATADIR = './new_facebook/'
 USER_ID = '107' # options are 0, 107, 348, 414, ...
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-4
 RANDOM_SEED = 42
 NUM_STEPS = 100 # number of learning steps; 1 step per alter
 BATCH_SIZE = 940# for ego 107, 940 is all the training alters. Try reducing BATCH_SIZE to just 10 or 50
@@ -60,10 +60,10 @@ def dataReader(data_dir=DATADIR, user_id=USER_ID):
 
 def variable_summaries(var):
   '''Attach a lot of summaries to a Tensor (for TensorBoard visualization).'''
-  with tf.name_scope('summaries'):
+  with tf.variable_scope('summaries'):
     mean = tf.reduce_mean(var)
     tf.summary.scalar('mean', mean)
-    with tf.name_scope('stddev'):
+    with tf.variable_scope('stddev'):
       stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
     tf.summary.scalar('stddev', stddev)
     tf.summary.scalar('max', tf.reduce_max(var))
@@ -71,31 +71,33 @@ def variable_summaries(var):
     tf.summary.histogram('histogram', var)
 
 def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
-  with tf.name_scope(layer_name):
-    with tf.name_scope('weights'):
-      weights = tf.Variable( tf.random_normal([input_dim, output_dim], seed=RANDOM_SEED), dtype=tf.float32, name='w')
-      variable_summaries(weights)
-    with tf.name_scope('biases'):
-      biases = tf.Variable(tf.zeros([output_dim], dtype=tf.float32), name='b')
-      variable_summaries(biases)
-    with tf.name_scope('Wx_plus_b'):
-      preactivate = tf.matmul(input_tensor, weights) + biases
-      tf.summary.histogram('pre_activations', preactivate)
+  with tf.variable_scope(layer_name, reuse=tf.AUTO_REUSE):
+    weights = tf.get_variable('weights', [input_dim, output_dim], initializer=\
+        tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED))
+    variable_summaries(weights)
+    
+    biases = tf.get_variable('biases', [output_dim], initializer=             \
+        tf.constant_initializer(value=0.0))
+    variable_summaries(biases)
+    
+    preactivate = tf.matmul(input_tensor, weights) + biases
+    tf.summary.histogram('pre_activations', preactivate)
     activations = act(preactivate, name='activation')
     tf.summary.histogram('activations', activations)
     return activations
 
 def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
-  with tf.name_scope(layer_name):
-    with tf.name_scope('weights'):
-      weights = tf.Variable( tf.random_normal([input_dim, output_dim], seed=RANDOM_SEED), dtype=tf.float32, name='w')
-      variable_summaries(weights)
-    with tf.name_scope('biases'):
-      biases = tf.Variable(tf.zeros([output_dim], dtype=tf.float32), name='b')
-      variable_summaries(biases)
-    with tf.name_scope('Wx_plus_b'):
-      preactivate = tf.matmul(input_tensor, weights) + biases
-      tf.summary.histogram('pre_activations', preactivate)
+  with tf.variable_scope(layer_name, reuse=tf.AUTO_REUSE):
+    weights = tf.get_variable('weights', [input_dim, output_dim], initializer=\
+        tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED))
+    variable_summaries(weights)
+    
+    biases = tf.get_variable('biases', [output_dim], initializer=             \
+        tf.constant_initializer(value=0.0))
+    variable_summaries(biases)
+    
+    preactivate = tf.matmul(input_tensor, weights) + biases
+    tf.summary.histogram('pre_activations', preactivate)
     activations = act(preactivate, name='activation')
     tf.summary.histogram('activations', activations)
     return activations
@@ -148,19 +150,19 @@ def main():
     Y_test = tf.convert_to_tensor(Y_testm, dtype=tf.float32)
     n_alt = tf.convert_to_tensor(num_alters, dtype=tf.int32) #FIXME: try removing n_alt
 
-    #with tf.name_scope('training_step'):
-      # defining training batch
+    # assemble batches
     step_ph = tf.placeholder(dtype=tf.int32, shape=())
     idx = tf.mod(step_ph*BATCH_SIZE, n_alt-BATCH_SIZE)
     X = X_train[idx:(idx+BATCH_SIZE), :]
     B = B_train[idx:(idx+BATCH_SIZE), :]
     Y = Y_train[idx:(idx+BATCH_SIZE), :]
     
+    # compute loss and define optimizer
     logits = forwardPass(X, B, num_alters, num_feat, num_circles)
     loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y)
     optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(loss)
     
-    #with tf.name_scope('training_prec_rec'):
+    # precision and recall
     tr_logits = forwardPass(X_train, B_train, num_alters, num_feat, num_circles)
     tr_precision, tr_recall = modelPrecisionRecall(tr_logits, Y_train)
   
@@ -168,8 +170,10 @@ def main():
     te_precision, te_recall = modelPrecisionRecall(te_logits, Y_test)
     
     # summary stuff for tensorboard
+    tf.summary.scalar('loss', loss)
     merged = tf.summary.merge_all()
-    
+  
+  # running session
   with tf.Session(graph=graph) as sess:
     tf.global_variables_initializer().run()
     summary_writer = tf.summary.FileWriter('./tf_logs', sess.graph)
