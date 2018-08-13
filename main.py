@@ -70,21 +70,13 @@ def variable_summaries(var):
     tf.summary.scalar('min', tf.reduce_min(var))
     tf.summary.histogram('histogram', var)
 
-def weight_variable(shape):
-  initial = tf.random_normal(shape, seed=RANDOM_SEED)
-  return tf.Variable(initial, dtype=tf.float32)
-
-def bias_variable(shape):
-  initial = tf.random_normal(shape=shape, seed=RANDOM_SEED)
-  return tf.Variable(initial, dtype=tf.float32)    
-
 def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
   with tf.name_scope(layer_name):
     with tf.name_scope('weights'):
-      weights = weight_variable([input_dim, output_dim])
+      weights = tf.Variable( tf.random_normal([input_dim, output_dim], seed=RANDOM_SEED), dtype=tf.float32, name='w')
       variable_summaries(weights)
     with tf.name_scope('biases'):
-      biases = bias_variable([output_dim])
+      biases = tf.Variable(tf.zeros([output_dim], dtype=tf.float32), name='b')
       variable_summaries(biases)
     with tf.name_scope('Wx_plus_b'):
       preactivate = tf.matmul(input_tensor, weights) + biases
@@ -96,10 +88,10 @@ def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu
 def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
   with tf.name_scope(layer_name):
     with tf.name_scope('weights'):
-      weights = weight_variable([input_dim, output_dim])
+      weights = tf.Variable( tf.random_normal([input_dim, output_dim], seed=RANDOM_SEED), dtype=tf.float32, name='w')
       variable_summaries(weights)
     with tf.name_scope('biases'):
-      biases = bias_variable([output_dim])
+      biases = tf.Variable(tf.zeros([output_dim], dtype=tf.float32), name='b')
       variable_summaries(biases)
     with tf.name_scope('Wx_plus_b'):
       preactivate = tf.matmul(input_tensor, weights) + biases
