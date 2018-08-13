@@ -4,9 +4,9 @@ The purpose of this project is to extract rules from neural networks, by cleverl
 
 ### Prerequisites
 
-Python 3.6
-Virtualenv
-Tensorflow 1.8 (in your virtualenv)
+*Python 3.6
+*Virtualenv
+*Tensorflow 1.8 (in your virtualenv)
 
 ## Getting Started
 
