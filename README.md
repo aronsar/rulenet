@@ -35,6 +35,7 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 
 ## Acknowledgments
 
+* Joshua McCoy, for his excellent advising
+* Erica and Arunpreet
 * Hat tip to anyone whose code was used
-* Inspiration
 * etc
