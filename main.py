@@ -1,17 +1,20 @@
 import tensorflow as tf
 import numpy as np
+from subprocess import call
 import pdb
 
 DATADIR = './new_facebook/'
 USER_ID = '107' # options are 0, 107, 348, 414, ...
 LEARNING_RATE = 1e-4
 RANDOM_SEED = 42
-NUM_STEPS = 100 # number of learning steps; 1 step per alter
+NUM_STEPS = 100 # number of learning steps
 BATCH_SIZE = 940# for ego 107, 940 is all the training alters. Try reducing BATCH_SIZE to just 10 or 50
 DISPLAY_EVERY = 1
 
 np.random.seed(RANDOM_SEED)
 tf.set_random_seed(RANDOM_SEED)
+
+call("rm -rf tf_logs")
 
 def file_len(fname):
   with open(fname) as f:
@@ -91,24 +94,31 @@ def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, la
     weights = tf.get_variable('weights', [input_dim, output_dim], initializer=\
         tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED))
     variable_summaries(weights)
+    tf.summary.image('bil_weights', tf.expand_dims(tf.expand_dims(weights, axis=-1), axis=-1))
     
     biases = tf.get_variable('biases', [output_dim], initializer=             \
         tf.constant_initializer(value=0.0))
     variable_summaries(biases)
     
-    preactivate = tf.matmul(input_tensor, weights) + biases
-    tf.summary.histogram('pre_activations', preactivate)
-    activations = act(preactivate, name='activation')
+    preac = tf.matmul(input_tensor, weights) + biases
+    #mean, variance = tf.nn.moments(preac, axes=0)
+    #preac = (preac - mean) / tf.sqrt(variance + 1.0e-6)
+    tf.summary.histogram('pre_activations', preac)
+    activations = act(preac, name='activation')
     tf.summary.histogram('activations', activations)
-    return activations
+    with_bool = activations + boolean_tensor
+    tf.summary.histogram('with_bool', with_bool)
+    return with_bool
     
 def forwardPass(X, B, num_alters, num_feat, num_circles):
   # hidden layer sizes
+  # FIXME: insert summary of what function does (docstring comment)
   h1 = int((num_alters + num_feat) / 2)
-  
+  #h1 = 30
   layer1 = affine_layer(X, num_alters, h1, 'affine_layer1')
   layer2 = bool_injection_layer(layer1, B, h1, num_feat, 'bool_inj_layer2')
-  logits = affine_layer(layer2, num_feat, num_circles, 'affine_layer3', act=tf.identity)
+  layer3 = bool_injection_layer(layer2, B, num_feat, num_feat, 'bool_inj_layer3')
+  logits = affine_layer(layer3, num_feat, num_circles, 'affine_layer4', act=tf.identity)
   
   return logits
   
