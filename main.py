@@ -5,9 +5,10 @@ import pdb
 
 DATADIR = './new_facebook/'
 USER_ID = '107' # options are 0, 107, 348, 414, ...
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
+LAMBDA = 0.01 # regularization constant
 RANDOM_SEED = 42
-NUM_STEPS = 100 # number of learning steps
+NUM_STEPS = 800 # number of learning steps
 BATCH_SIZE = 940# for ego 107, 940 is all the training alters. Try reducing BATCH_SIZE to just 10 or 50
 DISPLAY_EVERY = 1
 
@@ -76,7 +77,8 @@ def variable_summaries(var):
 def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
   with tf.variable_scope(layer_name, reuse=tf.AUTO_REUSE):
     weights = tf.get_variable('weights', [input_dim, output_dim], initializer=\
-        tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED))
+        tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED),  \
+        regularizer=tf.contrib.layers.l1_regularizer(LAMBDA))
     variable_summaries(weights)
     
     biases = tf.get_variable('biases', [output_dim], initializer=             \
@@ -92,17 +94,18 @@ def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu
 def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
   with tf.variable_scope(layer_name, reuse=tf.AUTO_REUSE):
     weights = tf.get_variable('weights', [input_dim, output_dim], initializer=\
-        tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED))
+        tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED),  \
+        regularizer=tf.contrib.layers.l1_regularizer(LAMBDA))
     variable_summaries(weights)
-    tf.summary.image('bil_weights', tf.expand_dims(tf.expand_dims(weights, axis=-1), axis=-1))
+    tf.summary.image('bil_weights', tf.expand_dims(tf.expand_dims(weights, axis=-1), axis=0))
     
     biases = tf.get_variable('biases', [output_dim], initializer=             \
         tf.constant_initializer(value=0.0))
     variable_summaries(biases)
     
     preac = tf.matmul(input_tensor, weights) + biases
-    #mean, variance = tf.nn.moments(preac, axes=0)
-    #preac = (preac - mean) / tf.sqrt(variance + 1.0e-6)
+    mean, variance = tf.nn.moments(preac, axes=0)
+    preac = (preac - mean) / tf.sqrt(variance + 1.0e-6)
     tf.summary.histogram('pre_activations', preac)
     activations = act(preac, name='activation')
     tf.summary.histogram('activations', activations)
@@ -169,17 +172,24 @@ def main():
     
     # compute loss and define optimizer
     logits = forwardPass(X, B, num_alters, num_feat, num_circles)
-    loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y)
+    loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y) \
+               + tf.losses.get_regularization_loss()
     optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(loss)
     
     # precision and recall
     tr_logits = forwardPass(X_train, B_train, num_alters, num_feat, num_circles)
     tr_precision, tr_recall = modelPrecisionRecall(tr_logits, Y_train)
-  
+    
     te_logits = forwardPass(X_test, B_test, num_alters, num_feat, num_circles)
     te_precision, te_recall = modelPrecisionRecall(te_logits, Y_test)
     
     # summary stuff for tensorboard
+    with tf.variable_scope('prec_rec_summary'):
+      tf.summary.scalar('train_precision', tr_precision)
+      tf.summary.scalar('train_recall', tr_recall)
+      tf.summary.scalar('test_precision', te_precision)
+      tf.summary.scalar('test_recall', te_recall)
+    
     tf.summary.scalar('loss', loss)
     merged = tf.summary.merge_all()
   
