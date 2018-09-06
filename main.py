@@ -22,7 +22,7 @@ def file_len(fname):
     for i, l in enumerate(f):
       pass
   return i + 1
-
+'''
 def dataReader(data_dir=DATADIR, user_id=USER_ID):
   num_mutual_friends = file_len(DATADIR + USER_ID + '.feat')
   num_feat = file_len(DATADIR + USER_ID + '.featnames')
@@ -61,7 +61,23 @@ def dataReader(data_dir=DATADIR, user_id=USER_ID):
   Y_testm = circle_membership_matrix[lim:,:]
   
   return X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm
+'''
 
+def dataReader(data_dir=DATADIR):
+  data = np.load(data_dir + '/data.npz')['data']
+  bool_mat = np.load(data_dir + '/bool_mat.npz')['bool_mat']
+  label = np.load(data_dir + '/label.npz')['label']
+  
+  lim = int(.9 * len(label))
+  X_trainm = data[:lim,:] # the m at the end of X_trainm is for "matrix"
+  X_testm = data[lim:,:]
+  B_trainm = bool_mat[:lim,:]
+  B_testm = bool_mat[lim:,:]
+  Y_trainm = label[:lim,:]
+  Y_testm = label[lim:,:]
+  
+  return X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm
+  
 def variable_summaries(var):
   '''Attach a lot of summaries to a Tensor (for TensorBoard visualization).'''
   with tf.variable_scope('summaries'):
@@ -109,9 +125,9 @@ def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, la
     tf.summary.histogram('pre_activations', preac)
     activations = act(preac, name='activation')
     tf.summary.histogram('activations', activations)
-    with_bool = activations + boolean_tensor
-    tf.summary.histogram('with_bool', with_bool)
-    return with_bool
+    #with_bool = activations + boolean_tensor
+    #tf.summary.histogram('with_bool', with_bool)
+    return activations
     
 def forwardPass(X, B, num_alters, num_feat, num_circles):
   # hidden layer sizes
@@ -143,9 +159,11 @@ def modelPrecisionRecall(logits, labels):
 def main():
   print('Loading data ... ', end='') # end='' doesn't print new line for aesthetic reasons
   X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm = dataReader(DATADIR, USER_ID)
-  num_alters = file_len(DATADIR + USER_ID + '.feat')
-  num_feat = file_len(DATADIR + USER_ID + '.featnames')
-  num_circles = file_len(DATADIR + USER_ID + '.circles')
+  n_train, data_dim = X_trainm.shape
+  n_test = X_testm.shape[0]
+  label_dim = Y_trainm.shape[1]
+  bool_dim = B_trainm.shape[1]
+  
   print('Loaded!\n')
   
   print('Training ... ')
@@ -161,26 +179,26 @@ def main():
     B_test = tf.convert_to_tensor(B_testm, dtype=tf.float32)
     Y_train = tf.convert_to_tensor(Y_trainm, dtype=tf.float32)
     Y_test = tf.convert_to_tensor(Y_testm, dtype=tf.float32)
-    n_alt = tf.convert_to_tensor(num_alters, dtype=tf.int32) #FIXME: try removing n_alt
+    n_tr = tf.convert_to_tensor(num_train, dtype=tf.int32) #FIXME: try removing n_alt
 
     # assemble batches
     step_ph = tf.placeholder(dtype=tf.int32, shape=())
-    idx = tf.mod(step_ph*BATCH_SIZE, n_alt-BATCH_SIZE)
+    idx = tf.mod(step_ph*BATCH_SIZE, n_tr-BATCH_SIZE)
     X = X_train[idx:(idx+BATCH_SIZE), :]
     B = B_train[idx:(idx+BATCH_SIZE), :]
     Y = Y_train[idx:(idx+BATCH_SIZE), :]
     
     # compute loss and define optimizer
-    logits = forwardPass(X, B, num_alters, num_feat, num_circles)
+    logits = forwardPass(X, B, n_train, bool_dim, label_dim)
     loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y) \
                + tf.losses.get_regularization_loss()
     optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(loss)
     
     # precision and recall
-    tr_logits = forwardPass(X_train, B_train, num_alters, num_feat, num_circles)
+    tr_logits = forwardPass(X_train, B_train, n_train, bool_dim, label_dim)
     tr_precision, tr_recall = modelPrecisionRecall(tr_logits, Y_train)
     
-    te_logits = forwardPass(X_test, B_test, num_alters, num_feat, num_circles)
+    te_logits = forwardPass(X_test, B_test, n_test, bool_dim, label_dim)
     te_precision, te_recall = modelPrecisionRecall(te_logits, Y_test)
     
     # summary stuff for tensorboard
