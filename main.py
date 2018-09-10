@@ -3,13 +3,12 @@ import numpy as np
 from subprocess import call
 import pdb
 
-DATADIR = './new_facebook/'
-USER_ID = '107' # options are 0, 107, 348, 414, ...
-LEARNING_RATE = 1e-3
-LAMBDA = 0.01 # regularization constant
+DATADIR = './data_simple'
+LEARNING_RATE = 2e-3
+LAMBDA = 0.00000001 # regularization constant
 RANDOM_SEED = 42
-NUM_STEPS = 800 # number of learning steps
-BATCH_SIZE = 940# for ego 107, 940 is all the training alters. Try reducing BATCH_SIZE to just 10 or 50
+NUM_STEPS = 200 # number of learning steps
+BATCH_SIZE = 899# 
 DISPLAY_EVERY = 1
 
 np.random.seed(RANDOM_SEED)
@@ -22,46 +21,6 @@ def file_len(fname):
     for i, l in enumerate(f):
       pass
   return i + 1
-'''
-def dataReader(data_dir=DATADIR, user_id=USER_ID):
-  num_mutual_friends = file_len(DATADIR + USER_ID + '.feat')
-  num_feat = file_len(DATADIR + USER_ID + '.featnames')
-  num_circles = file_len(DATADIR + USER_ID + '.circles')
-  
-  mutual_friends_matrix = np.zeros([num_mutual_friends, num_mutual_friends]) # binary friend matrix (sparse)
-  feature_matrix = np.zeros([num_mutual_friends, num_feat])
-  circle_membership_matrix = np.zeros([num_mutual_friends, num_circles])
-  alter_array = []
-  
-  # obtain the edges/mutual friends, and populate alter_array
-  with open(DATADIR + USER_ID + '.edges') as f:
-    for line in f:
-      edge_idxs = [int(x) for x in line.split(' ')] # tuple of indices
-      mutual_friends_matrix[edge_idxs[0], edge_idxs[1]] = 1
-  
-  # get the features, and populate feature_matrix
-  with open(DATADIR + USER_ID + '.feat') as f:
-    for i, line in enumerate(f):
-      feature_vec = [int(x) for x in line.split(' ')]
-      feature_matrix[i,:] = feature_vec[1:] # dropping the first number, which is basically just the line number
-  
-  # get the circle membership info, and populate the circle membership matrix
-  with open(DATADIR + USER_ID + '.circles') as f:
-    for circle_index, line in enumerate(f):
-      for member in line.split(' ')[1:]: # we ignore the first word, which is just the circle index
-        if not member.isspace(): circle_membership_matrix[int(member),circle_index] = 1
-  
-  idxs = np.random.shuffle(np.arange(num_mutual_friends))
-  lim = int(.9 * num_mutual_friends)
-  X_trainm = mutual_friends_matrix[:lim,:] # the m at the end of X_trainm is for "matrix"
-  X_testm = mutual_friends_matrix[lim:,:]
-  B_trainm = feature_matrix[:lim,:]
-  B_testm = feature_matrix[lim:,:]
-  Y_trainm = circle_membership_matrix[:lim,:]
-  Y_testm = circle_membership_matrix[lim:,:]
-  
-  return X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm
-'''
 
 def dataReader(data_dir=DATADIR):
   data = np.load(data_dir + '/data.npz')['data']
@@ -90,7 +49,7 @@ def variable_summaries(var):
     tf.summary.scalar('min', tf.reduce_min(var))
     tf.summary.histogram('histogram', var)
 
-def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
+def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.sigmoid):
   with tf.variable_scope(layer_name, reuse=tf.AUTO_REUSE):
     weights = tf.get_variable('weights', [input_dim, output_dim], initializer=\
         tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED),  \
@@ -125,19 +84,19 @@ def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, la
     tf.summary.histogram('pre_activations', preac)
     activations = act(preac, name='activation')
     tf.summary.histogram('activations', activations)
-    #with_bool = activations + boolean_tensor
-    #tf.summary.histogram('with_bool', with_bool)
+    with_bool = activations + boolean_tensor
+    tf.summary.histogram('with_bool', with_bool)
     return activations
     
-def forwardPass(X, B, num_alters, num_feat, num_circles):
+def forwardPass(X, B, input_dim, bool_dim, label_dim):
   # hidden layer sizes
   # FIXME: insert summary of what function does (docstring comment)
-  h1 = int((num_alters + num_feat) / 2)
-  #h1 = 30
-  layer1 = affine_layer(X, num_alters, h1, 'affine_layer1')
-  layer2 = bool_injection_layer(layer1, B, h1, num_feat, 'bool_inj_layer2')
-  layer3 = bool_injection_layer(layer2, B, num_feat, num_feat, 'bool_inj_layer3')
-  logits = affine_layer(layer3, num_feat, num_circles, 'affine_layer4', act=tf.identity)
+  h1 = int((input_dim + bool_dim) / 2)
+  #h1 = 10
+  layer1 = affine_layer(X, input_dim, h1, 'affine_layer1')
+  layer2 = bool_injection_layer(layer1, B, h1, bool_dim, 'bool_inj_layer2')
+  layer3 = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'bool_inj_layer3')
+  logits = affine_layer(layer3, bool_dim, label_dim, 'affine_layer4', act=tf.identity)
   
   return logits
   
@@ -156,9 +115,22 @@ def modelPrecisionRecall(logits, labels):
   #recall = tf.Print(recall, [tf.reduce_min(pred), tf.reduce_max(pred), tf.reduce_min(labels), tf.reduce_max(labels), tf.reduce_min(mult), tf.reduce_max(mult)])
   return precision, recall
 
+def accuracy(logits, labels):
+  """
+  Calculates the accuracy the model achieves.
+  
+  logits is a tensor of shape [batch_size, label_dim]
+  labels is a tensor of shape [batch_size]
+  """
+  
+  pred = tf.argmax(input=logits, axis=1)
+  labels = tf.argmax(input=labels, axis=1)
+  accuracy = tf.contrib.metrics.accuracy(predictions=pred, labels=labels, name="accuracy")
+  return accuracy
+  
 def main():
   print('Loading data ... ', end='') # end='' doesn't print new line for aesthetic reasons
-  X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm = dataReader(DATADIR, USER_ID)
+  X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm = dataReader(DATADIR)
   n_train, data_dim = X_trainm.shape
   n_test = X_testm.shape[0]
   label_dim = Y_trainm.shape[1]
@@ -179,7 +151,7 @@ def main():
     B_test = tf.convert_to_tensor(B_testm, dtype=tf.float32)
     Y_train = tf.convert_to_tensor(Y_trainm, dtype=tf.float32)
     Y_test = tf.convert_to_tensor(Y_testm, dtype=tf.float32)
-    n_tr = tf.convert_to_tensor(num_train, dtype=tf.int32) #FIXME: try removing n_alt
+    n_tr = tf.convert_to_tensor(n_train, dtype=tf.int32) #FIXME: try removing n_alt
 
     # assemble batches
     step_ph = tf.placeholder(dtype=tf.int32, shape=())
@@ -189,24 +161,24 @@ def main():
     Y = Y_train[idx:(idx+BATCH_SIZE), :]
     
     # compute loss and define optimizer
-    logits = forwardPass(X, B, n_train, bool_dim, label_dim)
-    loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y) \
+    logits = forwardPass(X, B, data_dim, bool_dim, label_dim)
+    #loss = tf.losses.sigmoid_cross_entropy(logits=logits, multi_class_labels=Y) \
+    #           + tf.losses.get_regularization_loss()
+    loss = tf.losses.softmax_cross_entropy(logits=logits, onehot_labels=Y)      \
                + tf.losses.get_regularization_loss()
     optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(loss)
     
     # precision and recall
-    tr_logits = forwardPass(X_train, B_train, n_train, bool_dim, label_dim)
-    tr_precision, tr_recall = modelPrecisionRecall(tr_logits, Y_train)
+    tr_logits = forwardPass(X_train, B_train, data_dim, bool_dim, label_dim)
+    tr_accuracy = accuracy(tr_logits, Y_train)
     
-    te_logits = forwardPass(X_test, B_test, n_test, bool_dim, label_dim)
-    te_precision, te_recall = modelPrecisionRecall(te_logits, Y_test)
+    te_logits = forwardPass(X_test, B_test, data_dim, bool_dim, label_dim)
+    te_accuracy = accuracy(te_logits, Y_test)
     
     # summary stuff for tensorboard
-    with tf.variable_scope('prec_rec_summary'):
-      tf.summary.scalar('train_precision', tr_precision)
-      tf.summary.scalar('train_recall', tr_recall)
-      tf.summary.scalar('test_precision', te_precision)
-      tf.summary.scalar('test_recall', te_recall)
+    with tf.variable_scope('accuracy_summary'):
+      tf.summary.scalar('train_accuracy', tr_accuracy)
+      tf.summary.scalar('test_accuracy', te_accuracy)
     
     tf.summary.scalar('loss', loss)
     merged = tf.summary.merge_all()
@@ -223,13 +195,13 @@ def main():
         summary, _, loss_value = sess.run([merged, optimizer, loss], feed_dict=feed_dict)
         summary_writer.add_summary(summary, step)
       else:
-        summary, _, loss_value, tr_p, tr_r, te_p, te_r = sess.run(               \
-            [merged, optimizer, loss, tr_precision, tr_recall, te_precision, te_recall], \
+        summary, _, loss_value, tr_acc, te_acc = sess.run(               \
+            [merged, optimizer, loss, tr_accuracy, te_accuracy], \
             feed_dict=feed_dict)
         summary_writer.add_summary(summary, step)
-        print(('step {:4d}:   loss={:7.3f}   tr_p={:.3f}   tr_r={:.3f}'          \
-             + '   te_p={:.3f}   te_r={:.3f}').format(                           \
-             step, loss_value, tr_p, tr_r, te_p, te_r))
+        print(('step {:4d}:   loss={:7.3f}   tr_acc={:.3f}'          \
+             + '   te_acc={:.3f}').format(                           \
+             step, loss_value, tr_acc, te_acc))
                
 if __name__ == '__main__':
   main()

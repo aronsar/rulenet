@@ -4,16 +4,18 @@
 
 import numpy as np
 import argparse
+import os
 
 def quadrant_binary(data_matrix):
   """
   This target function randomly assigns some quadrants to be the label True, and 
   the rest of the quadrants to be the label False. Takes the data matrix as
-  argument, and returns the label vector.
+  argument, and returns a one-hot label matrix.
   """
   
   n, d = data_matrix.shape
-  true_quadrants = np.random.randint(0, 2, size=np.power(2, d))
+  #true_quadrants = np.random.randint(0, 2, size=np.power(2, d))
+  true_quadrants = np.array([0, 0, 0, 0, 0, 0, 0, 1])
   print("The true quadrants are:")
   list = []
   for i, quadrant in enumerate(true_quadrants):
@@ -25,7 +27,7 @@ def quadrant_binary(data_matrix):
   
   # next line assumes that each row of bool_matrix is a binary number and returns
   # a list of decimal conversions. Eg: if the 6th row of bool_matrix is [1,0,0,1],
-  # then the 6th element of quadrants will be 9.
+  # then the 6th element of quadrants will be 9. The number of rows = num_instances
   quadrants = np.array([bool_matrix[i,:].dot(1<<np.arange(d)[::-1]) for i in range(n)])
   
   label_vector = true_quadrants[quadrants]
@@ -33,7 +35,6 @@ def quadrant_binary(data_matrix):
   # now we turn that label_vector of indices into a one hot label matrix
   label_matrix = np.zeros((label_vector.size, label_vector.max()+1))
   label_matrix[np.arange(label_vector.size), label_vector] = 1
-  import pdb; pdb.set_trace()
   return label_matrix, bool_matrix
   
 def main():
@@ -43,11 +44,18 @@ def main():
                       
   parser.add_argument('--d', type=int, required=True, dest='n_dimensions',
                       help='the number of data dimensions')
+
+  parser.add_argument('--data_dir', type=str, dest='data_dir',
+                      help='the data directory',
+                      default='data_simple')
                       
   parser.add_argument('--data_name', type=str, dest='data_file_name',
                       help='name of the output file',
                       default='data')
                       
+  parser.add_argument('--bool_name', type=str, dest='boolean_file_name',
+                      help='name of the bool file',
+                      default='bool_mat')
   parser.add_argument('--label_name', type=str, dest='label_file_name',
                       help='name of the label file',
                       default='label')
@@ -58,11 +66,13 @@ def main():
                       default='quadrant_binary')
                       
   args = parser.parse_args()
-
+  import pdb; pdb.set_trace()
+  os.chdir(args.data_dir)
   n = args.n_instances
   d = args.n_dimensions
   data_file_name = args.data_file_name
   label_file_name = args.label_file_name
+  boolean_file_name = args.boolean_file_name
   target_function = args.target_function
 
   data_matrix = np.random.rand(n, d)
@@ -77,8 +87,8 @@ def main():
   elif target_function == 'circles':
     target_function = circles
     
-  label_vector, bool_matrix = target_function(data_matrix)
-  np.savez(label_file_name, label=label_vector)
-  np.savez('bool_mat', bool_mat=bool_matrix)
+  label_matrix, bool_matrix = target_function(data_matrix)
+  np.savez(label_file_name, label=label_matrix)
+  np.savez(boolean_file_name, bool_mat=bool_matrix)
 if __name__ == '__main__':
   main()
