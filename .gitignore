@@ -1,3 +1,5 @@
 venv
 tf_logs
 "to do.txt"
+data_simple
+!data_simple\data_generator.py

@@ -6,7 +6,7 @@ import pdb
 DATADIR = './data_simple'
 LEARNING_RATE = 2e-3
 LAMBDA = 0.00000001 # regularization constant
-RANDOM_SEED = 42
+RANDOM_SEED = 30
 NUM_STEPS = 200 # number of learning steps
 BATCH_SIZE = 899# 
 DISPLAY_EVERY = 1
@@ -15,12 +15,6 @@ np.random.seed(RANDOM_SEED)
 tf.set_random_seed(RANDOM_SEED)
 
 call("rm -rf tf_logs")
-
-def file_len(fname):
-  with open(fname) as f:
-    for i, l in enumerate(f):
-      pass
-  return i + 1
 
 def dataReader(data_dir=DATADIR):
   data = np.load(data_dir + '/data.npz')['data']
@@ -49,7 +43,7 @@ def variable_summaries(var):
     tf.summary.scalar('min', tf.reduce_min(var))
     tf.summary.histogram('histogram', var)
 
-def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.sigmoid):
+def affine_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
   with tf.variable_scope(layer_name, reuse=tf.AUTO_REUSE):
     weights = tf.get_variable('weights', [input_dim, output_dim], initializer=\
         tf.random_normal_initializer(mean=0.0, stddev=.1, seed=RANDOM_SEED),  \
@@ -79,48 +73,67 @@ def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, la
     variable_summaries(biases)
     
     preac = tf.matmul(input_tensor, weights) + biases
-    mean, variance = tf.nn.moments(preac, axes=0)
-    preac = (preac - mean) / tf.sqrt(variance + 1.0e-6)
+    #mean, variance = tf.nn.moments(preac, axes=0)
+    #preac = (preac - mean) / tf.sqrt(variance + 1.0e-6) # batch normalization
     tf.summary.histogram('pre_activations', preac)
     activations = act(preac, name='activation')
     tf.summary.histogram('activations', activations)
-    with_bool = activations + boolean_tensor
-    tf.summary.histogram('with_bool', with_bool)
+    activations = activations * boolean_tensor
+    tf.summary.histogram('with_bool', activations)
     return activations
     
 def forwardPass(X, B, input_dim, bool_dim, label_dim):
   # hidden layer sizes
   # FIXME: insert summary of what function does (docstring comment)
-  h1 = int((input_dim + bool_dim) / 2)
-  #h1 = 10
-  layer1 = affine_layer(X, input_dim, h1, 'affine_layer1')
-  layer2 = bool_injection_layer(layer1, B, h1, bool_dim, 'bool_inj_layer2')
-  layer3 = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'bool_inj_layer3')
-  logits = affine_layer(layer3, bool_dim, label_dim, 'affine_layer4', act=tf.identity)
+  # FIXME: also combine with display_activations if you want
+  h1 = int((input_dim + bool_dim*2) / 2)
+  layer1 = affine_layer(X, input_dim, h1, 'input_affine_layer')
+  layer2 = bool_injection_layer(layer1, B, h1, bool_dim, 'first_bool_inj_layer')
+  layer3 = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'second_bool_inj_layer')
+  logits = affine_layer(layer3, bool_dim, label_dim, 'last_layer', act=tf.identity)
   
   return logits
   
-def modelPrecisionRecall(logits, labels):
-  # We compute precision by dividing the number of correctly assigned circle memberships
-  # by the total number of assigned circle memberships in pred. 
+def forwardPass_dispAct(X, input_dim, bool_dim, label_dim):
+  """
+  Does a forward pass using the same weights as were trained in forwardPass()
+  and displays the input layer, every activation layer, and the output layer.
+  Also picks a random datapoint from the input datapoints for display.
   
-  # To find recall, we divide the total correctly assigned circle memberships 
-  # by the total number of circle memberships in the labels.
+  X: tensor of shape [batch size, input dim]
+  input_dim: dimensionality of the input
+  bool_dim: dimensionality of the boolean vector (2*input_dim)
+  label_dim: number of possible labels
+  """
+  h1 = int((input_dim + bool_dim*2) / 2)
   
-  pred = tf.round(tf.nn.sigmoid(logits)) # maps from [-inf, inf] to {0, 1}
-  mult = tf.multiply(pred, labels)
-  precision = tf.divide(tf.reduce_sum(mult), tf.reduce_sum(pred))
-  recall = tf.divide(tf.reduce_sum(mult), tf.reduce_sum(labels))
-  #recall = tf.Print(recall, [tf.reduce_sum(labels), tf.reduce_sum(pred), tf.reduce_sum(mult)])
-  #recall = tf.Print(recall, [tf.reduce_min(pred), tf.reduce_max(pred), tf.reduce_min(labels), tf.reduce_max(labels), tf.reduce_min(mult), tf.reduce_max(mult)])
-  return precision, recall
-
+  #input = tf.py_func(pick_rand, [X], tf.float32)
+  input = tf.expand_dims(X[2,:], axis=0)
+  layer1 = affine_layer(input, input_dim, h1, 'input_affine_layer')
+  layer2 = affine_layer(layer1, h1, bool_dim, 'first_bool_inj_layer')
+  layer3 = affine_layer(layer2, bool_dim, bool_dim, 'second_bool_inj_layer')
+  logits = affine_layer(layer3, bool_dim, label_dim, 'last_layer', act=tf.identity)
+  
+  true = tf.py_func(display_activations, [input, layer1, layer2, layer3, logits], tf.bool)
+  
+  return true
+  
+def display_activations(*args):
+  for layer in args:
+    print([('%.3f' % x).rjust(6,' ') for x in layer[0]])
+  
+  return True
+  
+def pick_rand(X):
+  # FIXME: actually pick randomly
+  return X[0,:]
+  
 def accuracy(logits, labels):
   """
   Calculates the accuracy the model achieves.
   
-  logits is a tensor of shape [batch_size, label_dim]
-  labels is a tensor of shape [batch_size]
+  logits: tensor of shape [batch_size, label_dim]
+  labels: tensor of shape [batch_size]
   """
   
   pred = tf.argmax(input=logits, axis=1)
@@ -175,6 +188,9 @@ def main():
     te_logits = forwardPass(X_test, B_test, data_dim, bool_dim, label_dim)
     te_accuracy = accuracy(te_logits, Y_test)
     
+    # displaying activations
+    display_acts = forwardPass_dispAct(X_test, data_dim, bool_dim, label_dim)
+    
     # summary stuff for tensorboard
     with tf.variable_scope('accuracy_summary'):
       tf.summary.scalar('train_accuracy', tr_accuracy)
@@ -202,6 +218,8 @@ def main():
         print(('step {:4d}:   loss={:7.3f}   tr_acc={:.3f}'          \
              + '   te_acc={:.3f}').format(                           \
              step, loss_value, tr_acc, te_acc))
-               
+    
+    summary, _ = sess.run([merged, display_acts], feed_dict={step_ph:10})
+
 if __name__ == '__main__':
   main()

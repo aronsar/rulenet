@@ -15,20 +15,22 @@ def quadrant_binary(data_matrix):
   
   n, d = data_matrix.shape
   #true_quadrants = np.random.randint(0, 2, size=np.power(2, d))
-  true_quadrants = np.array([0, 0, 0, 0, 0, 0, 0, 1])
+  true_quadrants = np.array([0, 1, 1, 0, 0, 1, 1, 0])
   print("The true quadrants are:")
   list = []
   for i, quadrant in enumerate(true_quadrants):
     if quadrant == 1:
-      list.append(i)
+      list.append(i) 
   print(list)
   
   bool_matrix = data_matrix > 0
+  bool_matrix_negated = data_matrix < 0
+  bool_matrix = np.concatenate((bool_matrix, bool_matrix_negated), axis=1)
   
   # next line assumes that each row of bool_matrix is a binary number and returns
   # a list of decimal conversions. Eg: if the 6th row of bool_matrix is [1,0,0,1],
   # then the 6th element of quadrants will be 9. The number of rows = num_instances
-  quadrants = np.array([bool_matrix[i,:].dot(1<<np.arange(d)[::-1]) for i in range(n)])
+  quadrants = np.array([bool_matrix[i,:d].dot(1<<np.arange(d)[::-1]) for i in range(n)])
   
   label_vector = true_quadrants[quadrants]
   
@@ -66,7 +68,7 @@ def main():
                       default='quadrant_binary')
                       
   args = parser.parse_args()
-  import pdb; pdb.set_trace()
+  #import pdb; pdb.set_trace()
   os.chdir(args.data_dir)
   n = args.n_instances
   d = args.n_dimensions
@@ -86,7 +88,7 @@ def main():
     target_function = quadrant_multi
   elif target_function == 'circles':
     target_function = circles
-    
+  
   label_matrix, bool_matrix = target_function(data_matrix)
   np.savez(label_file_name, label=label_matrix)
   np.savez(boolean_file_name, bool_mat=bool_matrix)
