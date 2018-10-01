@@ -15,7 +15,7 @@ def quadrant_binary(data_matrix):
   
   n, d = data_matrix.shape
   #true_quadrants = np.random.randint(0, 2, size=np.power(2, d))
-  true_quadrants = np.array([0, 1, 1, 0, 0, 1, 1, 0])
+  true_quadrants = np.array([0, 1, 0, 1, 0, 1, 0, 1])
   print("The true quadrants are:")
   list = []
   for i, quadrant in enumerate(true_quadrants):
@@ -31,6 +31,10 @@ def quadrant_binary(data_matrix):
   # a list of decimal conversions. Eg: if the 6th row of bool_matrix is [1,0,0,1],
   # then the 6th element of quadrants will be 9. The number of rows = num_instances
   quadrants = np.array([bool_matrix[i,:d].dot(1<<np.arange(d)[::-1]) for i in range(n)])
+  
+  # How evenly are the points distributed among the quadrants?
+  #hist = np.histogram(quadrants, [0,1,2,3,4,5,6,7,8])
+  #print(hist)
   
   label_vector = true_quadrants[quadrants]
   

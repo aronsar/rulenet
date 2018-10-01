@@ -108,16 +108,33 @@ def forwardPass_dispAct(X, B, input_dim, bool_dim, label_dim):
   h1 = int((input_dim + bool_dim*2) / 2)
   
   #input = tf.py_func(pick_rand, [X], tf.float32)
-  X = tf.expand_dims(X[3,:], axis=0)
-  B = tf.expand_dims(B[3,:], axis=0)
+  # FIXME: use the entire test set, not just one point
+  #X = X[0:3,:]
+  #B = B[0:3,:]
   layer1 = affine_layer(X, input_dim, h1, 'input_affine_layer')
   layer2 = bool_injection_layer(layer1, B, h1, bool_dim, 'first_bool_inj_layer')
   layer3 = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'second_bool_inj_layer')
   logits = affine_layer(layer3, bool_dim, label_dim, 'last_layer', act=tf.identity)
   
-  true = tf.py_func(display_activations, [X, layer1, layer2, layer3, logits], tf.bool)
+  #true = tf.py_func(display_activations, [X, layer1, layer2, layer3, logits], tf.bool)
+  true = tf.py_func(display_histogram, [layer2, layer3], tf.bool)
   
   return true
+  
+def display_histogram(*args):
+  #total_hist = np.zeros((1,6)) #FIXME: no hard code 6
+  
+  for layer in args:
+    import pdb; pdb.set_trace()
+    max_indices_vector = np.argmax(layer, axis=1)
+    histogram, _= np.histogram(max_indices_vector, [0,1,2,3,4,5,6]) #FIXME: no hard code
+    #total_hist += histogram
+    print(histogram)
+    
+  #print(total_hist)
+  
+  return True
+  
   
 def display_activations(*args):
   for layer in args:
@@ -190,7 +207,7 @@ def main():
     te_accuracy = accuracy(te_logits, Y_test)
     
     # displaying activations
-    display_acts = forwardPass_dispAct(X_test, B, data_dim, bool_dim, label_dim)
+    display_acts = forwardPass_dispAct(X_test, B_test, data_dim, bool_dim, label_dim)
     
     # summary stuff for tensorboard
     with tf.variable_scope('accuracy_summary'):
