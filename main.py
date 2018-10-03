@@ -125,7 +125,6 @@ def display_histogram(*args):
   #total_hist = np.zeros((1,6)) #FIXME: no hard code 6
   
   for layer in args:
-    import pdb; pdb.set_trace()
     max_indices_vector = np.argmax(layer, axis=1)
     histogram, _= np.histogram(max_indices_vector, [0,1,2,3,4,5,6]) #FIXME: no hard code
     #total_hist += histogram
