@@ -1,15 +1,16 @@
 import tensorflow as tf
 import numpy as np
 from subprocess import call
-import pdb
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 DATADIR = './data_simple'
 LEARNING_RATE = 2e-3
 LAMBDA = 0.00000001 # regularization constant
-RANDOM_SEED = 30
-NUM_STEPS = 200 # number of learning steps
+RANDOM_SEED = 37
+NUM_STEPS = 201 # number of learning steps
 BATCH_SIZE = 899# 
-DISPLAY_EVERY = 1
+DISPLAY_EVERY = 100
 
 np.random.seed(RANDOM_SEED)
 tf.set_random_seed(RANDOM_SEED)
@@ -117,22 +118,23 @@ def forwardPass_dispAct(X, B, input_dim, bool_dim, label_dim):
   logits = affine_layer(layer3, bool_dim, label_dim, 'last_layer', act=tf.identity)
   
   #true = tf.py_func(display_activations, [X, layer1, layer2, layer3, logits], tf.bool)
-  true = tf.py_func(display_histogram, [layer2, layer3], tf.bool)
+  hist = tf.py_func(display_histogram, [layer2, layer3], tf.float32)
   
-  return true
+  return hist
   
 def display_histogram(*args):
-  #total_hist = np.zeros((1,6)) #FIXME: no hard code 6
-  
+  # performs histogram over all boolean injection layer max activations
+  total_hist = np.zeros((1,6)) #FIXME: no hard code 6
+
   for layer in args:
     max_indices_vector = np.argmax(layer, axis=1)
     histogram, _= np.histogram(max_indices_vector, [0,1,2,3,4,5,6]) #FIXME: no hard code
-    #total_hist += histogram
-    print(histogram)
+    total_hist += histogram
+    #print(histogram)
     
   #print(total_hist)
   
-  return True
+  return total_hist.astype(np.float32)
   
   
 def display_activations(*args):
@@ -161,11 +163,14 @@ def accuracy(logits, labels):
 def main():
   print('Loading data ... ', end='') # end='' doesn't print new line for aesthetic reasons
   X_trainm, X_testm, B_trainm, B_testm, Y_trainm, Y_testm = dataReader(DATADIR)
+  X_test_truem = X_testm[Y_testm[:,1] > 0, :]
+  X_test_falsem = X_testm[Y_testm[:,1] == 0, :]
+  B_test_truem = B_testm[Y_testm[:,1] > 0, :]
+  B_test_falsem = B_testm[Y_testm[:,1] == 0, :]
   n_train, data_dim = X_trainm.shape
   n_test = X_testm.shape[0]
   label_dim = Y_trainm.shape[1]
   bool_dim = B_trainm.shape[1]
-  
   print('Loaded!\n')
   
   print('Training ... ')
@@ -183,6 +188,12 @@ def main():
     Y_test = tf.convert_to_tensor(Y_testm, dtype=tf.float32)
     n_tr = tf.convert_to_tensor(n_train, dtype=tf.int32) #FIXME: try removing n_alt
 
+    # partition test set
+    X_test_true = tf.convert_to_tensor(X_test_truem, dtype=tf.float32)
+    X_test_false = tf.convert_to_tensor(X_test_falsem, dtype=tf.float32)
+    B_test_true = tf.convert_to_tensor(B_test_truem, dtype=tf.float32)
+    B_test_false = tf.convert_to_tensor(B_test_falsem, dtype=tf.float32) 
+    
     # assemble batches
     step_ph = tf.placeholder(dtype=tf.int32, shape=())
     idx = tf.mod(step_ph*BATCH_SIZE, n_tr-BATCH_SIZE)
@@ -206,7 +217,8 @@ def main():
     te_accuracy = accuracy(te_logits, Y_test)
     
     # displaying activations
-    display_acts = forwardPass_dispAct(X_test, B_test, data_dim, bool_dim, label_dim)
+    acts_hist_true = forwardPass_dispAct(X_test_true, B_test_true, data_dim, bool_dim, label_dim)
+    acts_hist_false = forwardPass_dispAct(X_test_false, B_test_false, data_dim, bool_dim, label_dim)
     
     # summary stuff for tensorboard
     with tf.variable_scope('accuracy_summary'):
@@ -218,25 +230,39 @@ def main():
   
   # running session
   with tf.Session(graph=graph) as sess:
-    tf.global_variables_initializer().run()
-    summary_writer = tf.summary.FileWriter('./tf_logs', sess.graph)
+    total_hist_true = np.zeros((1,6))
+    total_hist_false = np.zeros((1,6))
     
-    for step in range(NUM_STEPS):
-      feed_dict = {step_ph:step}
-          
-      if step % DISPLAY_EVERY:
-        summary, _, loss_value = sess.run([merged, optimizer, loss], feed_dict=feed_dict)
-        summary_writer.add_summary(summary, step)
-      else:
-        summary, _, loss_value, tr_acc, te_acc = sess.run(               \
-            [merged, optimizer, loss, tr_accuracy, te_accuracy], \
-            feed_dict=feed_dict)
-        summary_writer.add_summary(summary, step)
-        print(('step {:4d}:   loss={:7.3f}   tr_acc={:.3f}'          \
-             + '   te_acc={:.3f}').format(                           \
-             step, loss_value, tr_acc, te_acc))
-    
-    summary, _ = sess.run([merged, display_acts], feed_dict={step_ph:10})
-
+    for r_seed in range(50):
+      np.random.seed(r_seed)
+      tf.set_random_seed(r_seed)
+      
+      tf.global_variables_initializer().run()
+      summary_writer = tf.summary.FileWriter('./tf_logs', sess.graph)
+      
+      for step in range(NUM_STEPS):
+        feed_dict = {step_ph:step}
+            
+        if step % DISPLAY_EVERY:
+          summary, _, loss_value = sess.run([merged, optimizer, loss], feed_dict=feed_dict)
+          summary_writer.add_summary(summary, step)
+        else:
+          summary, _, loss_value, tr_acc, te_acc = sess.run(               \
+              [merged, optimizer, loss, tr_accuracy, te_accuracy], \
+              feed_dict=feed_dict)
+          summary_writer.add_summary(summary, step)
+          print(('step {:4d}:   loss={:7.3f}   tr_acc={:.3f}'          \
+               + '   te_acc={:.3f}').format(                           \
+               step, loss_value, tr_acc, te_acc))
+      
+      summary, ht, hf = sess.run([merged, acts_hist_true, acts_hist_false], \
+          feed_dict={step_ph:1})
+      
+      total_hist_true += ht
+      total_hist_false += hf
+      
+      print(total_hist_true)
+      print(total_hist_false)
+      
 if __name__ == '__main__':
   main()
