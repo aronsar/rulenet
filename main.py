@@ -83,15 +83,17 @@ def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, la
     tf.summary.histogram('with_bool', activations)
     return activations
     
-def forwardPass(X, B, input_dim, bool_dim, label_dim):
+def forwardPass(X, B, num_bools, input_dim, switch_layer_dim, label_dim):
   # hidden layer sizes
   # FIXME: insert summary of what function does (docstring comment)
   # FIXME: also combine with display_activations if you want
-  h1 = int((input_dim + bool_dim*2) / 2)
-  layer1 = affine_layer(X, input_dim, h1, 'input_affine_layer')
-  layer2 = bool_injection_layer(layer1, B, h1, bool_dim, 'first_bool_inj_layer')
-  layer3 = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'second_bool_inj_layer')
-  logits = affine_layer(layer3, bool_dim, label_dim, 'last_layer', act=tf.identity)
+  
+  layer = affine_layer(X, input_dim, bool_dim, 'input_affine_layer')
+  
+  for i in range num_bools:
+    layer = bool_switch_layer(layer, B[i,:], h1, bool_dim, 'switch_layer_%d' % i)
+  
+  logits = affine_layer(layer, switch_layer_dim, label_dim, 'last_layer', act=tf.identity)
   
   return logits
   
