@@ -81,7 +81,7 @@ def bool_injection_layer(input_tensor, boolean_tensor, input_dim, output_dim, la
     tf.summary.histogram('activations', activations)
     activations = activations * boolean_tensor
     tf.summary.histogram('with_bool', activations)
-    return activations
+    return activations, weights
     
 def forwardPass(X, B, input_dim, bool_dim, label_dim):
   # hidden layer sizes
@@ -89,8 +89,8 @@ def forwardPass(X, B, input_dim, bool_dim, label_dim):
   # FIXME: also combine with display_activations if you want
   h1 = int((input_dim + bool_dim*2) / 2)
   layer1 = affine_layer(X, input_dim, h1, 'input_affine_layer')
-  layer2 = bool_injection_layer(layer1, B, h1, bool_dim, 'first_bool_inj_layer')
-  layer3 = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'second_bool_inj_layer')
+  layer2, _ = bool_injection_layer(layer1, B, h1, bool_dim, 'first_bool_inj_layer')
+  layer3, _ = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'second_bool_inj_layer')
   logits = affine_layer(layer3, bool_dim, label_dim, 'last_layer', act=tf.identity)
   
   return logits
@@ -113,26 +113,31 @@ def forwardPass_dispAct(X, B, input_dim, bool_dim, label_dim):
   #X = X[0:3,:]
   #B = B[0:3,:]
   layer1 = affine_layer(X, input_dim, h1, 'input_affine_layer')
-  layer2 = bool_injection_layer(layer1, B, h1, bool_dim, 'first_bool_inj_layer')
-  layer3 = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'second_bool_inj_layer')
+  layer2, weights2 = bool_injection_layer(layer1, B, h1, bool_dim, 'first_bool_inj_layer')
+  layer3, weights3 = bool_injection_layer(layer2, B, bool_dim, bool_dim, 'second_bool_inj_layer')
   logits = affine_layer(layer3, bool_dim, label_dim, 'last_layer', act=tf.identity)
   
   #true = tf.py_func(display_activations, [X, layer1, layer2, layer3, logits], tf.bool)
-  hist = tf.py_func(display_histogram, [layer2, layer3], tf.float32)
+  hist = tf.py_func(display_histogram, [layer3, weights3], tf.float32)
   
   return hist
   
-def display_histogram(*args):
-  # performs histogram over all boolean injection layer max activations
-  total_hist = np.zeros((1,6)) #FIXME: no hard code 6
-
-  for layer in args:
-    max_indices_vector = np.argmax(layer, axis=1)
-    histogram, _= np.histogram(max_indices_vector, [0,1,2,3,4,5,6]) #FIXME: no hard code
-    total_hist += histogram
-    #print(histogram)
+def display_histogram(layers, weights):
+  # layer is (batch_size, bool_dim)
+  # weights is (bool_dim, bool_dim)
+  
+  total_hist = np.zeros((6,6)) #FIXME: no hard code 6
+  #import pdb; pdb.set_trace()
+  
+  # iterates over rows of the layers matrix
+  for layer in layers:
+    tiled_layer = np.tile(np.expand_dims(layer, axis=1), 6)
+    #print(tiled_layer)
+    weights_dot_act = np.dot(tiled_layer, weights)
+    max_tuple = np.unravel_index(weights_dot_act.argmax(), weights_dot_act.shape)
+    #print(max_tuple)
+    total_hist[max_tuple] += 1
     
-  #print(total_hist)
   
   return total_hist.astype(np.float32)
   
@@ -230,10 +235,10 @@ def main():
   
   # running session
   with tf.Session(graph=graph) as sess:
-    total_hist_true = np.zeros((1,6))
-    total_hist_false = np.zeros((1,6))
+    total_hist_true = np.zeros((6,6))
+    total_hist_false = np.zeros((6,6))
     
-    for r_seed in range(50):
+    for r_seed in range(1000):
       np.random.seed(r_seed)
       tf.set_random_seed(r_seed)
       
@@ -261,6 +266,7 @@ def main():
       total_hist_true += ht
       total_hist_false += hf
       
+      np.set_printoptions(suppress=True)
       print(total_hist_true)
       print(total_hist_false)
       
