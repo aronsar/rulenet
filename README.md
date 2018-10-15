@@ -18,7 +18,7 @@ cd rulenet
 virtualenv venv
 venv\Scripts\activate #for Windows
 source venv/bin/activate #for Ubuntu
-pip install tensorflow=1.8 #needs an additional = sign for Windows
+pip install tensorflow=1.8 #use == for Windows instead of =
 python main.py
 tensorboard --logdir ./tf_logs
 ```
